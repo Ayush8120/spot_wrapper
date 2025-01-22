@@ -39,6 +39,7 @@ class SpotArm:
         robot_state: RobotState,
         robot_command_client: RobotCommandClient,
         manipulation_api_client: ManipulationApiClient,
+        image_client: ImageClient,
         robot_state_client: RobotStateClient,
         max_command_duration: float,
         claim_and_power_decorator: ClaimAndPowerDecorator,
@@ -61,6 +62,7 @@ class SpotArm:
         self._max_command_duration = max_command_duration
         self._robot_command_client = robot_command_client
         self._manipulation_api_client = manipulation_api_client
+        self._image_client = image_client
         self._robot_state_client = robot_state_client
         self._claim_and_power_decorator = claim_and_power_decorator
         self._claim_and_power_decorator.decorate_functions(
@@ -694,7 +696,7 @@ class SpotArm:
         except Exception as e:
             return False, f"An error occured while trying to grasp from pose {e}"
 
-    def walk_object(self, frame: str, distance: float) -> typing.Tuple[bool, string]:
+    def walk_object(self, frame: str, distance: float) -> typing.Tuple[bool, str]:
         '''
         Attempt to reach an object from the image based selection of an object
 
@@ -712,8 +714,8 @@ class SpotArm:
             else:
                 self._logger.info('Getting the image from: %s', frame)
                 #i avoided thinking about using wrapper
-                self.spot_image_response = SpotImages(self._robot, self._logger, ImageClient).get_rgb_image(frame) 
-                
+                spot_image = SpotImages(self._robot, self._logger, self._image_client) 
+                self.spot_image_response = spot_image.get_rgb_image(frame)
                 image = self.spot_image_response
                 if image.shot.image.pixel_format == image_pb2.Image.PIXEL_FORMAT_DEPTH_U16:
                     dtype = np.uint16
