@@ -29,7 +29,6 @@ from bosdyn.client.time_sync import TimeSyncEndpoint
 from bosdyn.util import seconds_to_duration
 
 from spot_wrapper.wrapper_helpers import RobotState, ClaimAndPowerDecorator
-from spot_wrapper.spot_images import *
 
 class SpotArm:
     def __init__(
@@ -39,7 +38,6 @@ class SpotArm:
         robot_state: RobotState,
         robot_command_client: RobotCommandClient,
         manipulation_api_client: ManipulationApiClient,
-        image_client: ImageClient,
         robot_state_client: RobotStateClient,
         max_command_duration: float,
         claim_and_power_decorator: ClaimAndPowerDecorator,
@@ -62,7 +60,6 @@ class SpotArm:
         self._max_command_duration = max_command_duration
         self._robot_command_client = robot_command_client
         self._manipulation_api_client = manipulation_api_client
-        self._image_client = image_client
         self._robot_state_client = robot_state_client
         self._claim_and_power_decorator = claim_and_power_decorator
         self._claim_and_power_decorator.decorate_functions(
@@ -79,7 +76,6 @@ class SpotArm:
                 self.gripper_angle_open,
                 self.hand_pose,
                 self.grasp_3d,
-                self.walk_object,
             ],
         )
 
@@ -695,93 +691,3 @@ class SpotArm:
                 return False, msg
         except Exception as e:
             return False, f"An error occured while trying to grasp from pose {e}"
-
-    def walk_object(self, frame: str, distance: float) -> typing.Tuple[bool, str]:
-        '''
-        Attempt to reach an object from the image based selection of an object
-
-        Args:
-            frame: Frame name of the camera used to get image for obejct selection
-
-        Returns:
-            Bool indicating success, and a message with information.
-        '''
-        try:
-            success, msg = self.ensure_arm_power_and_stand()
-            if not success:
-                self._logger.info(msg)
-                return False, msg
-            else:
-                self._logger.info('Getting the image from: %s', frame)
-                #i avoided thinking about using wrapper
-                spot_image = SpotImages(self._robot, self._logger, self._image_client) 
-                self.spot_image_response = spot_image.get_rgb_image(frame)
-                image = self.spot_image_response
-                if image.shot.image.pixel_format == image_pb2.Image.PIXEL_FORMAT_DEPTH_U16:
-                    dtype = np.uint16
-                else:
-                    dtype = np.uint8
-                img = np.fromstring(image.shot.image.data, dtype=dtype)
-                if image.shot.image.format == image_pb2.Image.FORMAT_RAW:
-                    img = img.reshape(image.shot.image.rows, image.shot.image.cols)
-                else:
-                    img = cv2.imdecode(img, -1)
-
-                self._logger.info('Click on the object to walk up to... ')
-                image_title = 'Click to walk up to something'
-                cv2namedWindow(image_title)
-                cv2.setMouseCallback(image_title, cv_mouse_callback)
-                
-                #can try making this as an image_helper later
-                global g_image_click, g_image_display
-                g_image_display = img
-                cv2.imshow(image_title, g_image_display)
-                while g_image_click is None:
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q') or key == ord('Q'):
-                        # Quit
-                        print('"q" pressed, exiting.')
-                        exit(0)
-
-                self._logger.info('Walking to object at image location (%s, %s)', g_image_click[0],
-                                g_image_click[1])
-
-                walk_vec = geometry_pb2.Vec2(x=g_image_click[0], y=g_image_click[1])
-
-                # Optionally populate the offset distance parameter.
-                if distance is None:
-                    offset_distance = None
-                else:
-                    offset_distance = wrappers_pb2.FloatValue(value=distance)
-                
-                # Build the proto
-                walk_to = manipulation_api_pb2.WalkToObjectInImage(
-                    pixel_xy=walk_vec, transforms_snapshot_for_camera=image.shot.transforms_snapshot,
-                    frame_name_image_sensor=image.shot.frame_name_image_sensor,
-                    camera_model=image.source.pinhole, offset_distance=offset_distance)
-                
-                # Ask the robot to pick up the object
-                walk_to_request = manipulation_api_pb2.ManipulationApiRequest(
-                    walk_to_object_in_image=walk_to)
-                
-                # Send the request
-                cmd_response = self._manipulation_api_client.manipulation_api_command(
-                    manipulation_api_request=walk_to_request
-                )
-                
-                # Get feedback from the robot
-                success = self.block_until_manipulation_completes(
-                self._manipulation_api_client, cmd_response.cmd_id
-                )
-
-                if success:
-                    msg = "Reached to object successfully"
-                    self._logger.info(msg)
-                    return True, msg
-                else:
-                    msg = "Failed to reach the object.."
-                    self._logger.info(msg)
-                    return False, msg
-
-        except Exception as e:
-            return False, f"An error occured while trying to reach to the object from frame {frame} \n Error: {e}"
